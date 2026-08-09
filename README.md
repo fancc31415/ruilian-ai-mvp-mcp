@@ -1,4 +1,6 @@
-# 睿链 AI · FA Agent MVP (v0.1)
+# 睿链 AI · FA Agent MVP (v3)
+在线体验:https://ruilian-ai-mvp-gpufb3enqxafkwuuzjrjwl.streamlit.app
+项目源码:https://github.com/fancc31415/ruilian-ai-mvp
 
 ## 当前版本的关键设计决策
 
