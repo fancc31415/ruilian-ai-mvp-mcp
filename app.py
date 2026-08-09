@@ -20,6 +20,7 @@ from modules.agent_check import check_missing_info
 from modules.contact_matcher import parse_contact_list, score_contacts
 from modules.institution_verifier import verify_institution
 from modules.outreach_drafter import draft_institution_outreach, draft_contact_followup
+from modules.pitch_practice import INVESTOR_STYLES, get_next_question, generate_feedback
 
 AGENT_MAX_ROUNDS = 2  # 最多追问2轮，避免无限循环烦到用户
 
@@ -98,7 +99,9 @@ with st.sidebar:
 st.title("🔗 睿链 AI · FA Agent")
 st.caption("让每一份 BP，在 48 小时内遇见对的资本。MVP v0.1 · 赛道数据库 · AI智能匹配 · 定制化建议报告")
 
-tab1, tab2, tab3, tab4 = st.tabs(["① 上传 BP", "② 智能匹配", "③ 匹配报告", "④ 路演联系人匹配"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["① 上传 BP", "② 智能匹配", "③ 匹配报告", "④ 路演联系人匹配", "⑤ 投资人话术演练"]
+)
 
 if "bp_data" not in st.session_state:
     st.session_state.bp_data = None
@@ -114,6 +117,10 @@ if "verify_results" not in st.session_state:
     st.session_state.verify_results = {}
 if "outreach_drafts" not in st.session_state:
     st.session_state.outreach_drafts = {}  # 机构名/联系人名 -> 草拟文案
+if "pitch_history" not in st.session_state:
+    st.session_state.pitch_history = []
+if "pitch_feedback" not in st.session_state:
+    st.session_state.pitch_feedback = None
 
 
 def run_agent_check(bp_data):
@@ -393,3 +400,61 @@ with tab4:
                 st.markdown(f"**{c['name']}**　`{c.get('raw', '')}`")
                 st.caption(c["reason"])
                 st.markdown("---")
+
+with tab5:
+    st.subheader("投资人话术演练")
+    st.caption(
+        "模拟投资人追问，练习临场表达。Agent会针对你BP里没讲清楚的地方追问——"
+        "练完可以生成反馈，指出具体哪句话/哪个数据没站住，而不是'讲得不错'这种空话。"
+    )
+
+    if not st.session_state.bp_data:
+        st.warning("建议先在「① 上传 BP」完成解析（哪怕用示例），这样投资人角色才能针对你的项目提问。")
+
+    style = st.selectbox(
+        "选择这一轮的投资人风格",
+        list(INVESTOR_STYLES.keys()),
+        format_func=lambda s: f"{s} — {INVESTOR_STYLES[s]}",
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🎬 开始 / 重新开始演练", type="primary"):
+            st.session_state.pitch_history = []
+            st.session_state.pitch_feedback = None
+            bp_for_practice = st.session_state.bp_data or {}
+            with st.spinner("投资人正在准备第一个问题..."):
+                first_q = get_next_question(bp_for_practice, style, [], llm)
+            st.session_state.pitch_history.append({"role": "investor", "content": first_q})
+            st.rerun()
+    with col2:
+        if st.session_state.pitch_history and st.button("📋 结束并生成反馈"):
+            with st.spinner("正在复盘这场对话..."):
+                st.session_state.pitch_feedback = generate_feedback(st.session_state.pitch_history, llm)
+
+    for msg in st.session_state.pitch_history:
+        is_investor = msg["role"] == "investor"
+        with st.chat_message("assistant" if is_investor else "user"):
+            st.markdown(f"**{'🧑‍💼 投资人' if is_investor else '🙋 你'}**：{msg['content']}")
+
+    if st.session_state.pitch_history and not st.session_state.pitch_feedback:
+        answer = st.chat_input("输入你的回答，回车发送...")
+        if answer:
+            st.session_state.pitch_history.append({"role": "founder", "content": answer})
+            bp_for_practice = st.session_state.bp_data or {}
+            with st.spinner("投资人正在追问..."):
+                next_q = get_next_question(bp_for_practice, style, st.session_state.pitch_history, llm)
+            st.session_state.pitch_history.append({"role": "investor", "content": next_q})
+            st.rerun()
+
+    if st.session_state.pitch_feedback:
+        fb = st.session_state.pitch_feedback
+        st.markdown("---")
+        st.markdown("#### 📋 演练反馈")
+        st.markdown("**做得好的地方：**")
+        for s in fb.get("strengths", []):
+            st.markdown(f"- {s}")
+        st.markdown("**建议改进：**")
+        for imp in fb.get("improvements", []):
+            st.markdown(f"- {imp}")
+        st.caption(fb.get("overall_comment", ""))
