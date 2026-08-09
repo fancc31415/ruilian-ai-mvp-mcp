@@ -17,6 +17,7 @@ from modules.bp_parser import extract_text_from_file, parse_bp
 from modules.matcher import load_institutions, match_institutions
 from modules.report_generator import generate_match_reasons, export_markdown
 from modules.agent_check import check_missing_info
+from modules.contact_matcher import parse_contact_list, score_contacts
 
 AGENT_MAX_ROUNDS = 2  # 最多追问2轮，避免无限循环烦到用户
 
@@ -95,7 +96,7 @@ with st.sidebar:
 st.title("🔗 睿链 AI · FA Agent")
 st.caption("让每一份 BP，在 48 小时内遇见对的资本。MVP v0.1 · 赛道数据库 · AI智能匹配 · 定制化建议报告")
 
-tab1, tab2, tab3 = st.tabs(["① 上传 BP", "② 智能匹配", "③ 匹配报告"])
+tab1, tab2, tab3, tab4 = st.tabs(["① 上传 BP", "② 智能匹配", "③ 匹配报告", "④ 路演联系人匹配"])
 
 if "bp_data" not in st.session_state:
     st.session_state.bp_data = None
@@ -105,6 +106,8 @@ if "agent_questions" not in st.session_state:
     st.session_state.agent_questions = None
 if "agent_round" not in st.session_state:
     st.session_state.agent_round = 0
+if "contact_result" not in st.session_state:
+    st.session_state.contact_result = None
 
 
 def run_agent_check(bp_data):
@@ -284,3 +287,55 @@ with tab3:
                 file_name=f"{st.session_state.bp_data.get('company_name', '匹配报告')}_睿链AI匹配报告.md",
                 mime="text/markdown",
             )
+
+with tab4:
+    st.subheader("路演联系人匹配")
+    st.caption(
+        "路演/活动上加了一堆人，回头看着长长的联系人列表不知道谁值得优先跟进？"
+        "把随手记的联系人信息贴进去，Agent 帮你判断谁是真投资人、跟你赛道对不对得上——"
+        "信息不够判断的不瞎猜，会明确标出来还缺什么信息。"
+    )
+
+    if not st.session_state.bp_data:
+        st.warning("建议先在「① 上传 BP」完成解析（哪怕用示例），这样才能对照你的赛道/阶段做相关度打分。")
+
+    contact_raw = st.text_area(
+        "把联系人信息贴进来，一行一个（格式不用统一，姓名/机构/职位/交流片段都行）",
+        height=160,
+        placeholder="例：\n王总 - 红杉中国 投资经理\n陈总监 - IDG资本\n李四\n张经理，某某科技创始人，做电商的",
+    )
+
+    if st.button("🤖 让 Agent 帮我分优先级", type="primary", disabled=not contact_raw.strip()):
+        with st.spinner("正在解析联系人信息并对照赛道打分..."):
+            contacts = parse_contact_list(contact_raw, llm)
+            bp_for_score = st.session_state.bp_data or {"sectors": [], "stage": ""}
+            result = score_contacts(bp_for_score, contacts, institutions)
+            st.session_state.contact_result = result
+
+    if st.session_state.get("contact_result"):
+        result = st.session_state.contact_result
+        st.markdown("---")
+
+        st.markdown(f"#### 🎯 高优先级，建议尽快跟进（{len(result['high'])}人）")
+        if result["high"]:
+            for c in result["high"]:
+                with st.container(border=True):
+                    st.markdown(f"**{c['name']}**　`{c.get('org') or c.get('raw')}`")
+                    st.caption(c["reason"])
+        else:
+            st.caption("暂时没有能确定高相关的联系人。")
+
+        st.markdown(f"#### 🤔 待确认，信息不足以判断（{len(result['pending'])}人）")
+        if result["pending"]:
+            for c in result["pending"]:
+                with st.container(border=True):
+                    st.markdown(f"**{c['name']}**　`{c.get('raw', '')}`")
+                    st.caption(c["reason"])
+        else:
+            st.caption("没有信息不足的联系人。")
+
+        with st.expander(f"⚪ 低相关 / 非投资人（{len(result['low'])}人）"):
+            for c in result["low"]:
+                st.markdown(f"**{c['name']}**　`{c.get('raw', '')}`")
+                st.caption(c["reason"])
+                st.markdown("---")
