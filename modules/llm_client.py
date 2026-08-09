@@ -10,6 +10,7 @@ LLM 调用抽象层。
 """
 import os
 import json
+import requests
 from openai import OpenAI
 
 
@@ -25,6 +26,14 @@ class LLMClient:
             self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         else:
             self.client = None
+
+        # 联网搜索目前只对接了智谱BigModel的Web Search API，跟对话用的Key可以是两把不同的——
+        # 比如主力对话换成了别的更强的模型（大赛统一发的临时Key），但还想保留联网核实功能，
+        # 就单独配一个 ZHIPU_SEARCH_API_KEY 环境变量，两边互不影响。
+        self.search_api_key = os.getenv("ZHIPU_SEARCH_API_KEY") or (
+            self.api_key if "bigmodel.cn" in self.base_url else None
+        )
+        self.search_available = bool(self.search_api_key)
 
     def chat(self, system_prompt: str, user_prompt: str, json_mode: bool = False,
               temperature: float = 0.3) -> str:
@@ -61,3 +70,21 @@ class LLMClient:
             if cleaned.lower().startswith("json"):
                 cleaned = cleaned[4:]
         return json.loads(cleaned.strip())
+
+    def web_search(self, query: str, count: int = 5) -> list:
+        """联网搜索，返回搜索结果列表（每条含 title/content/link/publish_date）。
+        只支持智谱BigModel的Web Search API，用的是 search_api_key（可以跟主对话Key不是同一把）。
+        不可用时直接返回空列表，不假装搜过——上层要老实展示"未联网核实"，而不是编造一个核实结果。"""
+        if not self.search_available:
+            return []
+        try:
+            resp = requests.post(
+                "https://open.bigmodel.cn/api/paas/v4/web_search",
+                headers={"Authorization": f"Bearer {self.search_api_key}", "Content-Type": "application/json"},
+                json={"search_query": query, "search_engine": "search_std", "count": count},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            return resp.json().get("search_result", [])
+        except Exception:
+            return []
