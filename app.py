@@ -260,7 +260,7 @@ with tab1:
 with tab2:
     st.subheader("智能匹配")
     if not st.session_state.bp_data:
-        st.info("请先在「① 上传 BP」完成解析。")
+        st.info("请先在「② 上传 BP」完成解析。")
     else:
         top_n = st.slider("匹配机构数量", min_value=5, max_value=20, value=12)
         if st.button("运行匹配", type="primary"):
@@ -321,7 +321,7 @@ with tab2:
 with tab3:
     st.subheader("生成匹配报告")
     if not st.session_state.matches:
-        st.info("请先在「② 智能匹配」运行匹配。")
+        st.info("请先在「③ 智能匹配」运行匹配。")
     else:
         if st.button("生成完整报告（含匹配理由与沟通建议）", type="primary"):
             with st.spinner("正在为每家机构生成匹配理由与沟通建议..."):
@@ -379,7 +379,7 @@ with tab4:
     )
 
     if not st.session_state.bp_data:
-        st.warning("建议先在「① 上传 BP」完成解析（哪怕用示例），这样才能对照你的赛道/阶段做相关度打分。")
+        st.warning("建议先在「② 上传 BP」完成解析（哪怕用示例），这样才能对照你的赛道/阶段做相关度打分。")
 
     contact_raw = st.text_area(
         "把联系人信息贴进来，一行一个（格式不用统一，姓名/机构/职位/交流片段都行）",
@@ -443,7 +443,7 @@ with tab5:
     )
 
     if not st.session_state.bp_data:
-        st.warning("建议先在「① 上传 BP」完成解析（哪怕用示例），这样投资人角色才能针对你的项目提问。")
+        st.warning("建议先在「② 上传 BP」完成解析（哪怕用示例），这样投资人角色才能针对你的项目提问。")
 
     style = st.selectbox(
         "选择这一轮的投资人风格",
