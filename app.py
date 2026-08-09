@@ -97,10 +97,10 @@ with st.sidebar:
 
 # ---------- 主流程 ----------
 st.title("🔗 睿链 AI · FA Agent")
-st.caption("让每一份 BP，在 48 小时内遇见对的资本。MVP v0.1 · 赛道数据库 · AI智能匹配 · 定制化建议报告")
+st.caption("让每一份 BP，在 48 小时内遇见对的资本。v5版本 · 赛道数据库 · AI智能匹配 · 定制化建议报告")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["① 上传 BP", "② 智能匹配", "③ 匹配报告", "④ 路演联系人匹配", "⑤ 投资人话术演练"]
+tab5, tab1, tab2, tab3, tab4 = st.tabs(
+    ["① 投资人话术演练", "② 上传 BP", "③ 智能匹配", "④ 匹配报告", "⑤ 路演联系人匹配"]
 )
 
 if "bp_data" not in st.session_state:
