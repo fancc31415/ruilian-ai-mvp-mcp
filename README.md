@@ -1,36 +1,5 @@
 # 睿链 AI · FA Agent MVP (v0.1)
 
-3天冲出来的可运行 MVP，验证核心闭环：**BP上传解析 → 智能匹配 → 匹配报告生成**。
-
-## 快速开始
-
-```bash
-pip install -r requirements.txt
-
-# 配置 DeepSeek API Key（不配置也能跑，会自动降级为关键词规则模式，但解析和匹配理由的质量会明显下降）
-export DEEPSEEK_API_KEY="sk-你的key"
-
-streamlit run app.py
-```
-
-浏览器会自动打开 `http://localhost:8501`。
-
-## 目录结构
-
-```
-ruilian_mvp/
-├── app.py                     # Streamlit 主应用（三步走流程）
-├── requirements.txt
-├── data/
-│   └── institutions.json      # 机构种子库（64家，公开信息拼接）
-├── modules/
-│   ├── llm_client.py          # LLM调用抽象层（默认DeepSeek，OpenAI兼容协议，换模型只改这里）
-│   ├── bp_parser.py           # BP文本提取 + LLM结构化解析（含关键词规则降级方案）
-│   ├── matcher.py             # 多维度打分匹配引擎
-│   └── report_generator.py    # 匹配理由生成 + 报告导出
-└── uploads/                    # 用户上传的BP文件会存这里（未纳入git，注意运行时清理）
-```
-
 ## 当前版本的关键设计决策
 
 1. **LLM 降级机制**：所有依赖LLM的环节（BP解析、匹配理由生成）都有关键词规则/模板兜底，
@@ -58,31 +27,8 @@ ruilian_mvp/
 
 已加了「一键加载示例」按钮——用睿链AI自己的BP作为demo案例，评委点一下就能看完整流程，不用现场找文件上传。
 
-### 最快让评委能访问的方式：Streamlit Community Cloud（免费，10分钟内搞定）
 
-1. 把这个项目推到一个 **GitHub 仓库**（public 或 private 均可，Streamlit Cloud 免费版对 public 仓库支持最好）：
-   ```bash
-   cd ruilian_mvp
-   git init && git add . && git commit -m "睿链AI MVP v0.2"
-   # 去 github.com 建一个新仓库，然后：
-   git remote add origin https://github.com/你的用户名/ruilian-ai-mvp.git
-   git branch -M main && git push -u origin main
-   ```
-2. 打开 [share.streamlit.io](https://share.streamlit.io)，用 GitHub 账号登录，选择这个仓库，
-   Main file path 填 `app.py`，点 Deploy。
-3. 部署完会给你一个公开链接，形如 `https://ruilian-ai-mvp.streamlit.app`——这个链接直接可以
-   写进参赛材料里，评委随时能点开自己跑一遍。
-4. **重要**：在 Streamlit Cloud 的 App Settings → Secrets 里填入
-   `DEEPSEEK_API_KEY = "sk-xxxx"`，不要把 Key 直接写进代码或 push 到 GitHub。
-
-### 如果没时间搞部署，退而求其次的两个方案
-
-- **录屏**：本地跑起来后用 QuickTime / OBS 录一遍完整流程（点示例按钮 → 看解析结果 → 跑匹配 →
-  生成报告下载），2-3分钟，比现场演示更保险，不会因为网络问题翻车。
-- **截图 + 说明文档**：把 README 里的架构图、匹配报告截图整理进PPT，作为"技术方案佐证"，
-  这个最保底，任何情况下都能用。
-
-### Demo 讲解建议话术（30秒版本）
+### Demo 讲解
 
 > "这是我们做的智能匹配MVP：企业上传BP，AI自动提取赛道、阶段、融资金额这些关键信息，
 > 对照我们收录的机构数据库做多维度打分，几秒内输出Top10-15家最匹配的机构，每家还附带
@@ -90,8 +36,7 @@ ruilian_mvp/
 > 现在你看到的匹配逻辑和机构数据是种子版本，下一步我们会用真实的撮合成交反馈去校准
 > 匹配权重和数据准确度。"
 
-**诚实是加分项**：如果评委问"这个匹配准不准"，不要说"很准"——按实话说"这是基于规则的
-第一版，权重是我们按行业经验设的初始值，团队清楚知道要靠真实成交数据去迭代校准，这也是
+**诚实是加分项**：按实话说"这是基于规则的第一版，权重是我们按行业经验设的初始值，团队清楚知道要靠真实成交数据去迭代校准，这也是
 我们要融这轮种子资金重点投入的地方"。评委见得多，装准比承认还在验证阶段更容易扣分。
 
 ## 已知限制
