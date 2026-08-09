@@ -16,6 +16,9 @@ from modules.llm_client import LLMClient
 from modules.bp_parser import extract_text_from_file, parse_bp
 from modules.matcher import load_institutions, match_institutions
 from modules.report_generator import generate_match_reasons, export_markdown
+from modules.agent_check import check_missing_info
+
+AGENT_MAX_ROUNDS = 2  # 最多追问2轮，避免无限循环烦到用户
 
 load_dotenv()
 
@@ -44,6 +47,20 @@ DEMO_BP = {
         "赛道数据库处于冷启动阶段，匹配精度尚无真实成交数据验证",
     ],
     "_source": "demo_preset",
+}
+
+# 故意留了信息缺口的示例，专门用来演示"Agent主动追问"这个功能
+INCOMPLETE_DEMO_BP = {
+    "company_name": "某AI硬件初创公司",
+    "sectors": [],
+    "stage": "",
+    "funding_ask_wan": 0,
+    "valuation_wan": 0,
+    "business_summary": "未提供",
+    "highlights": ["核心团队有大厂芯片研发背景"],
+    "team_background": "未提供",
+    "risks_or_gaps": ["这是一份信息不全的模拟BP，用于演示Agent主动追问功能"],
+    "_source": "demo_preset_incomplete",
 }
 
 # ---------- 极简品牌样式（不依赖外部资源，纯CSS） ----------
@@ -84,6 +101,16 @@ if "bp_data" not in st.session_state:
     st.session_state.bp_data = None
 if "matches" not in st.session_state:
     st.session_state.matches = None
+if "agent_questions" not in st.session_state:
+    st.session_state.agent_questions = None
+if "agent_round" not in st.session_state:
+    st.session_state.agent_round = 0
+
+
+def run_agent_check(bp_data):
+    """跑一次Agent自检，把结果存进session_state。"""
+    with st.spinner("🤖 Agent 正在检查信息是否足够支撑精准匹配..."):
+        st.session_state.agent_questions = check_missing_info(bp_data, llm)
 
 with tab1:
     st.subheader("上传企业 BP")
@@ -94,9 +121,20 @@ with tab1:
         if st.button("🎯 一键加载示例（睿链AI 自己的BP）", use_container_width=True):
             st.session_state.bp_data = dict(DEMO_BP)
             st.session_state.matches = None
+            st.session_state.agent_round = 0
             st.session_state.pop("report_md", None)
+            run_agent_check(st.session_state.bp_data)
             st.rerun()
         st.caption("用睿链AI自己的融资BP作为示例，跑一遍完整的解析→匹配→报告流程")
+
+        if st.button("🤖 体验 Agent 主动追问（模拟信息不全的BP）", use_container_width=True):
+            st.session_state.bp_data = dict(INCOMPLETE_DEMO_BP)
+            st.session_state.matches = None
+            st.session_state.agent_round = 0
+            st.session_state.pop("report_md", None)
+            run_agent_check(st.session_state.bp_data)
+            st.rerun()
+        st.caption("特意留了信息缺口的模拟BP，能看到Agent自己判断该问什么、为什么问")
 
     with upload_col:
         uploaded = st.file_uploader("或上传真实 BP，支持 PDF / PPTX 格式", type=["pdf", "pptx"])
@@ -117,12 +155,65 @@ with tab1:
                         bp_data = parse_bp(raw_text, llm)
                         st.session_state.bp_data = bp_data
                         st.session_state.matches = None  # 重新解析后清空旧匹配结果
+                        st.session_state.agent_round = 0
+                        run_agent_check(bp_data)
                 except Exception as e:
                     st.error(f"解析失败：{e}")
+
+    # ---------- Agent 主动追问区块：信息不全时，先问再往下走 ----------
+    if (
+        st.session_state.bp_data
+        and st.session_state.agent_questions
+        and st.session_state.agent_round < AGENT_MAX_ROUNDS
+    ):
+        st.markdown("---")
+        with st.container(border=True):
+            st.markdown("#### 🤖 Agent 追问：这几个信息不确认清楚，匹配质量会打折扣")
+            st.caption("这是Agent自己检查后判断需要确认的点，不是随便问的——每条都写了为什么重要。")
+
+            answers = {}
+            with st.form("agent_followup_form"):
+                for q in st.session_state.agent_questions:
+                    st.markdown(f"**{q['question']}**")
+                    st.caption(f"💡 为什么问这个：{q.get('why_it_matters', '')}")
+                    answers[q["field"]] = st.text_input(
+                        "你的回答", key=f"agent_answer_{q['field']}_{st.session_state.agent_round}",
+                        label_visibility="collapsed",
+                    )
+                submitted = st.form_submit_button("提交补充信息，让Agent重新判断", type="primary")
+
+            if submitted:
+                bp = st.session_state.bp_data
+                for field, answer in answers.items():
+                    if not answer.strip():
+                        continue
+                    if field == "funding_ask_wan":
+                        # 尝试从回答里提取数字，提取不到就原样存进business_summary里当补充说明
+                        import re as _re
+                        m = _re.search(r"(\d+(?:\.\d+)?)", answer)
+                        if m:
+                            bp["funding_ask_wan"] = float(m.group(1))
+                    elif field == "sectors":
+                        bp["sectors"] = list(set(bp.get("sectors", []) + [answer.strip()]))
+                    elif field == "stage":
+                        for s in ["天使轮", "Pre-A轮", "A轮", "B轮", "C轮+"]:
+                            if s in answer:
+                                bp["stage"] = s
+                                break
+                    elif field == "business_summary":
+                        bp["business_summary"] = answer.strip()
+                st.session_state.bp_data = bp
+                st.session_state.agent_round += 1
+                run_agent_check(bp)  # 补充完再检查一遍，看Agent还有没有其他疑问
+                st.rerun()
 
     if st.session_state.bp_data:
         bp = st.session_state.bp_data
         st.markdown("---")
+        if st.session_state.agent_questions and st.session_state.agent_round >= AGENT_MAX_ROUNDS:
+            st.caption("🤖 已追问2轮，剩余信息缺口请在下方表单里手动补充确认。")
+        elif st.session_state.agent_round > 0:
+            st.caption("🤖 Agent 已确认信息基本完整，可以直接进入匹配，或在下方微调。")
         st.markdown("#### 解析结果（可手动修正后再进入匹配）")
 
         col1, col2 = st.columns(2)
