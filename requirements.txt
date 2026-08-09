@@ -1,0 +1,7 @@
+streamlit>=1.37
+openai>=1.30          # 用 openai SDK 调 DeepSeek（兼容 OpenAI 接口协议）
+python-dotenv>=1.0
+pdfplumber>=0.11      # 解析 PDF 版 BP
+python-pptx>=0.6.23   # 解析 PPT 版 BP
+pandas>=2.2
+markdown2>=2.4        # 报告导出用
