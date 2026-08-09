@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from modules.llm_client import LLMClient
 from modules.bp_parser import extract_text_from_file, parse_bp
 from modules.matcher import load_institutions, match_institutions
-from modules.report_generator import generate_match_reasons, export_markdown
+from modules.report_generator import generate_match_reasons, export_markdown, export_docx, export_pdf
 from modules.agent_check import check_missing_info
 from modules.contact_matcher import parse_contact_list, score_contacts
 from modules.institution_verifier import verify_institution
@@ -121,6 +121,8 @@ if "pitch_history" not in st.session_state:
     st.session_state.pitch_history = []
 if "pitch_feedback" not in st.session_state:
     st.session_state.pitch_feedback = None
+if "reason_cache" not in st.session_state:
+    st.session_state.reason_cache = {}  # 匹配理由缓存，避免重复点"生成报告"重复扣LLM费用
 
 
 def run_agent_check(bp_data):
@@ -323,18 +325,50 @@ with tab3:
     else:
         if st.button("生成完整报告（含匹配理由与沟通建议）", type="primary"):
             with st.spinner("正在为每家机构生成匹配理由与沟通建议..."):
-                enriched = generate_match_reasons(st.session_state.bp_data, st.session_state.matches, llm)
+                enriched = generate_match_reasons(
+                    st.session_state.bp_data, st.session_state.matches, llm, cache=st.session_state.reason_cache
+                )
                 st.session_state.enriched = enriched
                 st.session_state.report_md = export_markdown(st.session_state.bp_data, enriched)
+                st.session_state.pop("report_docx", None)
+                st.session_state.pop("report_pdf", None)
 
         if st.session_state.get("report_md"):
             st.markdown(st.session_state.report_md)
-            st.download_button(
-                "⬇️ 下载报告（Markdown）",
-                data=st.session_state.report_md,
-                file_name=f"{st.session_state.bp_data.get('company_name', '匹配报告')}_睿链AI匹配报告.md",
-                mime="text/markdown",
-            )
+            company_name = st.session_state.bp_data.get("company_name", "匹配报告")
+            dl_col1, dl_col2, dl_col3 = st.columns(3)
+            with dl_col1:
+                st.download_button(
+                    "⬇️ 下载 Markdown",
+                    data=st.session_state.report_md,
+                    file_name=f"{company_name}_睿链AI匹配报告.md",
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
+            with dl_col2:
+                if st.button("生成 Word 文件", use_container_width=True):
+                    with st.spinner("正在生成Word文档..."):
+                        st.session_state.report_docx = export_docx(st.session_state.bp_data, st.session_state.enriched)
+                if st.session_state.get("report_docx"):
+                    st.download_button(
+                        "⬇️ 下载 Word",
+                        data=st.session_state.report_docx,
+                        file_name=f"{company_name}_睿链AI匹配报告.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                    )
+            with dl_col3:
+                if st.button("生成 PDF 文件", use_container_width=True):
+                    with st.spinner("正在生成PDF..."):
+                        st.session_state.report_pdf = export_pdf(st.session_state.bp_data, st.session_state.enriched)
+                if st.session_state.get("report_pdf"):
+                    st.download_button(
+                        "⬇️ 下载 PDF",
+                        data=st.session_state.report_pdf,
+                        file_name=f"{company_name}_睿链AI匹配报告.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
 
 with tab4:
     st.subheader("路演联系人匹配")
