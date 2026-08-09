@@ -47,7 +47,34 @@ def _extract_pdf(file_path: str) -> str:
         for page in pdf.pages:
             text = page.extract_text() or ""
             chunks.append(text)
-    return "\n".join(chunks)
+
+    combined = "\n".join(chunks)
+    if len(combined.strip()) < 20:  # 提取到的文字太少，大概率是纯图片扫描件，走OCR兜底
+        ocr_text = _ocr_pdf(file_path)
+        if ocr_text.strip():
+            return ocr_text
+    return combined
+
+
+def _ocr_pdf(file_path: str) -> str:
+    """对扫描版PDF做OCR兜底：把每页渲染成图片，用tesseract识别中英文文字。
+    需要系统装了tesseract-ocr + tesseract-ocr-chi-sim（见项目根目录的 packages.txt）。
+    识别失败（比如部署环境没装tesseract）时返回空字符串，上层会提示用户文件无法解析，
+    不会假装读到内容。"""
+    try:
+        import pypdfium2 as pdfium
+        import pytesseract
+
+        pdf = pdfium.PdfDocument(file_path)
+        chunks = []
+        for page in pdf:
+            bitmap = page.render(scale=2.0)  # 放大渲染，小字也能识别准一些
+            pil_image = bitmap.to_pil()
+            text = pytesseract.image_to_string(pil_image, lang="chi_sim+eng")
+            chunks.append(text)
+        return "\n".join(chunks)
+    except Exception:
+        return ""
 
 
 def _extract_pptx(file_path: str) -> str:
