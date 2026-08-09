@@ -11,6 +11,7 @@
 """
 
 import re
+from modules.bp_parser import SECTOR_KEYWORDS  # 复用BP解析里已有的赛道关键词库，不重复维护
 
 CONTACT_PARSE_SYSTEM_PROMPT = """你是一名FA顾问Agent，正在帮用户整理路演/活动上加到的联系人信息。
 输入是用户随手记录的联系人信息，一行（或一段）一个联系人，格式很不规范——
@@ -38,31 +39,71 @@ is_likely_investor 判断规则：能看出明确是投资机构/基金相关（
 
 
 def _rule_based_parse(raw_text: str) -> list:
-    """没有LLM时的降级方案：按行拆分，用关键词猜是不是投资人。"""
-    investor_kw = ["资本", "创投", "基金", "投资", "VC", "PE", "Capital", "Ventures", "合伙人", "投资经理", "投资总监"]
-    non_investor_kw = ["创始人", "CEO", "记者", "媒体", "服务商", "律师", "会计"]
+    """没有LLM时的降级方案：把每行拆成 姓名/机构/职位，再判断投资人身份和赛道线索。
+    尽量靠"分隔符切分+关键词库"把信息榨干净，减少直接扔进'待确认'的比例。"""
+    investor_kw = [
+        "资本", "创投", "创业投资", "基金", "投资", "VC", "PE", "CVC",
+        "Capital", "Ventures", "Partners", "产投", "母基金", "资产管理",
+        "合伙人", "投资经理", "投资总监", "投资director", "MD", "董事总经理",
+        "生态合伙人", "基金经理", "FA", "财务顾问",
+    ]
+    non_investor_kw = [
+        "创始人", "CEO", "COO", "CTO", "总经理", "记者", "媒体", "编辑",
+        "服务商", "律师", "会计", "顾问", "BD", "市场", "HR", "猎头",
+    ]
+    separators = [" - ", " – ", "-", "，", ",", "、", "：", ":"]
 
     lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
     contacts = []
     for line in lines:
+        # 尝试用常见分隔符把"姓名 / 机构+职位"拆开，拆不出来就整行当姓名处理
+        parts = None
+        for sep in separators:
+            if sep in line:
+                candidate = [p.strip() for p in line.split(sep) if p.strip()]
+                if len(candidate) >= 2:
+                    parts = candidate
+                    break
+
+        if parts:
+            name_raw = parts[0]
+            org_title_text = " ".join(parts[1:])
+        else:
+            name_raw = line
+            org_title_text = ""
+
+        name_match = re.match(r"^([\u4e00-\u9fa5A-Za-z]{2,10})", name_raw)
+        name = name_match.group(1) if name_match else (name_raw[:10] if name_raw else "未知")
+
+        search_scope = org_title_text or line  # 没拆出机构职位部分时，退化到整行搜关键词
+
         is_investor = None
-        if any(kw in line for kw in investor_kw):
+        if any(kw in search_scope for kw in investor_kw):
             is_investor = True
-        elif any(kw in line for kw in non_investor_kw):
+        elif any(kw in search_scope for kw in non_investor_kw):
             is_investor = False
 
-        name_match = re.match(r"^([\u4e00-\u9fa5A-Za-z]{2,10})", line)
-        name = name_match.group(1) if name_match else "未知"
+        # 机构名：优先用拆分出来的 org_title_text（去掉常见职位后缀词），拆不出来就留空
+        org_guess = org_title_text
+        for title_kw in ["投资经理", "投资总监", "合伙人", "董事总经理", "创始人", "CEO", "总经理", "生态合伙人", "基金经理"]:
+            org_guess = org_guess.replace(title_kw, "").strip()
+
+        # 赛道线索：在整行文本里找SECTOR_KEYWORDS命中的赛道，命中就填上，不硬编造
+        sector_hint = ""
+        for sector, kws in SECTOR_KEYWORDS.items():
+            if any(kw in line for kw in kws):
+                sector_hint = sector
+                break
 
         missing = "" if is_investor is not None else "信息太少（只有姓名/寒暄），不知道对方机构和职位，无法判断是否是投资人"
 
         contacts.append({
             "raw": line,
             "name": name,
-            "org": "",
+            "org": org_guess,
             "title": "",
             "is_likely_investor": is_investor,
-            "sector_hint": "",
+            "sector_hint": sector_hint,
             "missing_info": missing,
         })
     return contacts
@@ -130,6 +171,9 @@ def score_contacts(bp: dict, contacts: list, institutions: list) -> dict:
         elif c.get("sector_hint") and c["sector_hint"] in bp_sectors:
             c["reason"] = f"✅ 交流内容里提到的方向（{c['sector_hint']}）和你们赛道吻合，机构库里暂时没有这家的详细数据，建议直接确认"
             high.append(c)
+        elif c.get("sector_hint"):
+            c["reason"] = f"对方看起来主投「{c['sector_hint']}」方向，跟你们赛道不太重合，优先级可以往后放放"
+            low.append(c)
         else:
             c["reason"] = "⚠️ 确认是投资人，但机构库里没有这家的数据，也看不出明确赛道倾向，建议直接问一句对方主投什么方向再判断"
             pending.append(c)
