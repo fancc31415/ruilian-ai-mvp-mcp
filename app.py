@@ -18,6 +18,8 @@ from modules.matcher import load_institutions, match_institutions
 from modules.report_generator import generate_match_reasons, export_markdown
 from modules.agent_check import check_missing_info
 from modules.contact_matcher import parse_contact_list, score_contacts
+from modules.institution_verifier import verify_institution
+from modules.outreach_drafter import draft_institution_outreach, draft_contact_followup
 
 AGENT_MAX_ROUNDS = 2  # 最多追问2轮，避免无限循环烦到用户
 
@@ -108,6 +110,10 @@ if "agent_round" not in st.session_state:
     st.session_state.agent_round = 0
 if "contact_result" not in st.session_state:
     st.session_state.contact_result = None
+if "verify_results" not in st.session_state:
+    st.session_state.verify_results = {}
+if "outreach_drafts" not in st.session_state:
+    st.session_state.outreach_drafts = {}  # 机构名/联系人名 -> 草拟文案
 
 
 def run_agent_check(bp_data):
@@ -255,6 +261,20 @@ with tab2:
 
         if st.session_state.matches:
             st.success(f"匹配完成，共找到 {len(st.session_state.matches)} 家候选机构")
+
+            if llm.search_available:
+                if st.button("🔍 联网核实 Top5 机构最新动态", type="secondary"):
+                    top5 = st.session_state.matches[:5]
+                    progress = st.progress(0, text="正在联网核实...")
+                    for i, m in enumerate(top5):
+                        sector_hint = m.get("matched_sectors", [""])[0] if m.get("matched_sectors") else ""
+                        st.session_state.verify_results[m["name"]] = verify_institution(m["name"], sector_hint, llm)
+                        progress.progress((i + 1) / len(top5), text=f"已核实 {i + 1}/{len(top5)}")
+                    progress.empty()
+                    st.rerun()
+            else:
+                st.caption("💡 配置支持联网搜索的智谱Key后，可以对Top5机构做实时动态核实（不只依赖静态种子库）")
+
             for m in st.session_state.matches:
                 with st.container(border=True):
                     c1, c2 = st.columns([3, 1])
@@ -267,6 +287,27 @@ with tab2:
                     bd = m["score_breakdown"]
                     st.progress(m["match_score"] / 100)
                     st.caption(f"赛道{bd['赛道匹配']} · 阶段{bd['阶段匹配']} · 规模{bd['规模匹配']} · 其他{bd['其他信号']}")
+
+                    verify = st.session_state.verify_results.get(m["name"])
+                    if verify:
+                        icon = {"True": "✅", "False": "⚠️", "None": "❓"}.get(str(verify.get("verified")), "❓")
+                        st.markdown(f"{icon} **联网核实**：{verify.get('summary', '')}")
+                        if verify.get("source_titles"):
+                            st.caption("信息来源：" + "；".join(verify["source_titles"]))
+
+                    draft_key = f"inst_{m['name']}"
+                    if st.button("✍️ 生成打招呼语", key=f"draft_btn_{draft_key}"):
+                        with st.spinner("正在草拟联系消息..."):
+                            st.session_state.outreach_drafts[draft_key] = draft_institution_outreach(
+                                st.session_state.bp_data, m, llm
+                            )
+                    if draft_key in st.session_state.outreach_drafts:
+                        st.text_area(
+                            "可直接复制修改后使用",
+                            value=st.session_state.outreach_drafts[draft_key],
+                            key=f"draft_text_{draft_key}",
+                            height=100,
+                        )
 
 with tab3:
     st.subheader("生成匹配报告")
@@ -318,10 +359,23 @@ with tab4:
 
         st.markdown(f"#### 🎯 高优先级，建议尽快跟进（{len(result['high'])}人）")
         if result["high"]:
-            for c in result["high"]:
+            for idx, c in enumerate(result["high"]):
                 with st.container(border=True):
                     st.markdown(f"**{c['name']}**　`{c.get('org') or c.get('raw')}`")
                     st.caption(c["reason"])
+
+                    draft_key = f"contact_{idx}_{c['name']}"
+                    if st.button("✍️ 生成跟进语", key=f"draft_btn_{draft_key}"):
+                        with st.spinner("正在草拟跟进消息..."):
+                            bp_for_draft = st.session_state.bp_data or {}
+                            st.session_state.outreach_drafts[draft_key] = draft_contact_followup(bp_for_draft, c, llm)
+                    if draft_key in st.session_state.outreach_drafts:
+                        st.text_area(
+                            "可直接复制修改后发送",
+                            value=st.session_state.outreach_drafts[draft_key],
+                            key=f"draft_text_{draft_key}",
+                            height=90,
+                        )
         else:
             st.caption("暂时没有能确定高相关的联系人。")
 
